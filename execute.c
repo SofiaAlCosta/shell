@@ -1,93 +1,119 @@
-#include "shell.h"
-#include <string.h>
-#include <unistd.h>
 #include <stdio.h>
-#include <sys/wait.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/wait.h>
+#include "shell.h"
 
-int containsPipe(int argc, char **argv) {
-    for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "|") == 0) {
+// Verifica se o comando termina com '&' e remove esse argumento
+int ultimo(int *numargs, char **args) {
+    if (*numargs > 0 && args[*numargs - 1][0] == '&') {
+        (*numargs)--;
+        args[*numargs] = NULL;
+        return BG;
+    }
+    return FG;
+}
+
+// Verifica se existe pipe e devolve o índice da posição do '|'
+int containsPipe(int numArgs, char **args) {
+    for (int i = 0; i < numArgs; i++) {
+        if (strcmp(args[i], "|") == 0)
             return i;
-        }
     }
     return -1;
 }
 
-void execute(int numargs, char **args) {
-    int pid, status;
-    int code = ultimo(&numargs, args);
+// Executa recursivamente comandos com pipes
+void execute_rec(int numargs, char **args, int input_fd) {
     int pipeIndex = containsPipe(numargs, args);
 
     if (pipeIndex == -1) {
-        // NÃO TEM PIPE: comportamento normal
-        if ((pid = fork()) < 0) {
-            perror("fork");
-            exit(1);
+        // Último comando da cadeia
+        if (input_fd != STDIN_FILENO) {
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
         }
 
-        if (pid == 0) {
-            numargs = redirects(numargs, args);
-            if (numargs == -1) exit(1);
+        args[numargs] = NULL;  
+        numargs = redirects(numargs, args);
 
-            execvp(*args, args);
-            perror(*args);
-            exit(1);
-        }
-
-        if (FG == code)
-            while (wait(&status) != pid);
-        return;
+        execvp(args[0], args);
+        perror(args[0]);
+        exit(1);
     }
 
-    // TEM PIPE: fazer dois fork()s e pipe()
+    // Divide os argumentos entre os dois lados do pipe
     args[pipeIndex] = NULL;
-    char **comando1 = args;
-    char **comando2 = &args[pipeIndex + 1];
+    int numargs1 = pipeIndex;
+    char **args1 = args;
+
+    int numargs2 = numargs - pipeIndex - 1;
+    char **args2_raw = &args[pipeIndex + 1];
+
+    // Criação de novo array para args2 (lado direito do pipe)
+    char *args2[64];
+    for (int i = 0; i < numargs2; i++) {
+        args2[i] = args2_raw[i];
+    }
+    args2[numargs2] = NULL;
 
     int fd[2];
-    pipe(fd);
+    if (pipe(fd) == -1) {
+        perror("pipe");
+        exit(1);
+    }
 
-    if ((pid = fork()) < 0) {
+    pid_t pid = fork();
+    if (pid < 0) {
         perror("fork");
         exit(1);
     }
 
     if (pid == 0) {
-        // FILHO
-        int pid_neto = fork();
-        if (pid_neto == 0) {
-            // NETO: executa comando1 → escreve no pipe
-            close(fd[0]);
-            dup2(fd[1], STDOUT_FILENO);
-            close(fd[1]);
-
-            execvp(comando1[0], comando1);
-            perror("execvp neto");
-            _exit(1);
-        } else {
-            // FILHO: executa comando2 ← lê do pipe
-            wait(NULL);
-
-            close(fd[1]);
-            dup2(fd[0], STDIN_FILENO);
-            close(fd[0]);
-
-            execvp(comando2[0], comando2);
-            perror("execvp filho");
-            _exit(1);
+        // Processo filho: comando à esquerda do pipe
+        dup2(fd[1], STDOUT_FILENO);
+        if (input_fd != STDIN_FILENO) {
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
         }
+
+        close(fd[0]);
+        close(fd[1]);
+
+        numargs1 = redirects(numargs1, args1);
+        execvp(args1[0], args1);
+        perror(args1[0]);
+        exit(1);
     }
 
-    if (FG == code)
-        while (wait(&status) != pid);
+    // Processo pai continua recursivamente com o lado direito
+    close(fd[1]);
+    if (input_fd != STDIN_FILENO)
+        close(input_fd);
+
+    execute_rec(numargs2, args2, fd[0]);
 }
 
-int ultimo(int *numargs, char **args) {
-    if (args[*numargs - 1][0] == '&') {
-        *numargs = *numargs - 1;
-        args[*numargs] = NULL;
-        return BG;
+// Função principal que executa comandos (com ou sem pipes, foreground/background)
+void execute(int numargs, char **args) {
+    int code = ultimo(&numargs, args);
+    pid_t pid = fork();
+    int status;
+
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
     }
-    return FG; // return FG ou BG definidos no shell.h
+
+    if (pid == 0) {
+        execute_rec(numargs, args, STDIN_FILENO);
+        exit(1);
+    }
+
+    if (code == FG) {
+        while (wait(&status) != pid);
+    } else {
+        printf("[BG] Processo iniciado com PID: %d\n", pid);
+    }
 }

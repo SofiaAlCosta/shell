@@ -7,6 +7,7 @@
 #include <time.h>
 #include <sys/types.h>
 
+// Compara o tamanho de dois ficheiros
 void cmd_maior(char *file1, char *file2) {
     struct stat st1, st2;
 
@@ -29,6 +30,7 @@ void cmd_maior(char *file1, char *file2) {
     }
 }
 
+// Dá permissão de execução ao dono de um ficheiro
 void cmd_setx(char *file) {
     struct stat st;
 
@@ -45,6 +47,7 @@ void cmd_setx(char *file) {
     }
 }
 
+// Remove permissões de leitura de grupo e outros
 void cmd_removerl(char *file) {
     struct stat st;
 
@@ -61,7 +64,7 @@ void cmd_removerl(char *file) {
     }
 }
 
-
+// Lista ficheiros de um diretório com inode, tamanho e data de modificação
 void cmd_sols(char *dir) {
     DIR *d;
     struct dirent *entry;
@@ -77,12 +80,19 @@ void cmd_sols(char *dir) {
         return;
     }
 
-    printf("Nome: %-19s Inode:     Tamanho:    bytes Última modificação:\n", "");
+    printf("%-25s %-10s %-11s %s\n", "Nome", "Inode", "Tamanho", "Última modificação");
+
     while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
         snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
         if (stat(path, &st) == 0) {
-            printf("%-25s %-10lu %-11ld %s",
-                   entry->d_name, st.st_ino, st.st_size, ctime(&st.st_mtime));
+            char *tempo = ctime(&st.st_mtime);
+            tempo[strcspn(tempo, "\n")] = '\0';  // remover newline
+
+            printf("%-25s %-10lu %-11ld %s\n",
+                   entry->d_name, st.st_ino, st.st_size, tempo);
         }
     }
 

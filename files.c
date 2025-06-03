@@ -1,81 +1,105 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <unistd.h>
+#include <string.h>
 #include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include "shell.h"
 
+// Verifica se um descritor de ficheiro está válido
 int fd_is_valid(int fd) {
     return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
 }
 
-void openfile(char *filename) {
-    int fd = open(filename, O_RDONLY);
+// Abre ficheiro para leitura e imprime o descritor
+void openfile(char *nome) {
+    int fd = open(nome, O_RDONLY);
     if (fd >= 0)
-        printf("Aberto %s com fd %d\n", filename, fd);
+        printf("Aberto %s para leitura com descritor fd %d\n", nome, fd);
     else
-        perror(filename);
+        perror(nome);
 }
 
+// Fecha um descritor de ficheiro
 void closefd(int fd) {
     if (close(fd) < 0)
-        perror("Erro ao fechar fd");
+        perror("closefd falhou");
     else
-        printf("%d fechado com sucesso\n", fd);
+        printf("Descritor %d fechado com sucesso\n", fd);
 }
 
-void readfile(char *fdStr, char *nStr) {
-    int fd = atoi(fdStr);
-    int n = atoi(nStr);
-    char buf[n];
+// Lê bytes de um descritor e imprime em ASCII e hexadecimal
+void readfile(char *fdstr, char *nbytesstr) {
+    int fd = atoi(fdstr);
+    int nbytes = atoi(nbytesstr);
+    char buffer[2048];
 
-    int r = read(fd, buf, n);
-    if (r <= 0) {
-        perror("read");
+    if (nbytes > 2048) nbytes = 2048;
+
+    int lidos = read(fd, buffer, nbytes);
+    if (lidos < 0) {
+        perror("Erro ao ler");
         return;
     }
 
-    printf("%.*s\n", r, buf);
-    for (int i = 0; i < r; i++) printf("%02x ", (unsigned char)buf[i]);
+    printf("ASCII: ");
+    for (int i = 0; i < lidos; i++) {
+        if (buffer[i] >= 32 && buffer[i] <= 126)
+            putchar(buffer[i]);
+        else
+            putchar('.');
+    }
+    printf("\nHex:   ");
+    for (int i = 0; i < lidos; i++) {
+        printf("%02x ", (unsigned char)buffer[i]);
+    }
     printf("\n");
 }
 
+// Mostra informação sobre descritores de ficheiro abertos
 void fileinfo() {
-    struct rlimit rl;
-    getrlimit(RLIMIT_NOFILE, &rl);
+    if (stdout) {
+        int outfd = fileno(stdout);
+        printf("STDOUT está aberto: descritor %d\n", outfd);
+    } else {
+        printf("STDOUT está fechado.\n");
+    }
 
-    FILE *out = stdout;
-    int fd_out = fileno(out);
-    printf("STDOUT está %s: número %d\n", out ? "aberto" : "fechado", fd_out);
-    printf("Limite máximo de descritores: %ld\n", rl.rlim_cur);
+    struct rlimit lim;
+    if (getrlimit(RLIMIT_NOFILE, &lim) == 0) {
+        printf("Limite de descritores de ficheiro do processo: %ld\n", lim.rlim_cur);
+    }
 
-    int total = 0;
     printf("Descritores abertos: ");
-    for (int i = 0; i < rl.rlim_cur; i++) {
+    int abertos = 0;
+    for (int i = 0; i < 64; i++) {
         if (fd_is_valid(i)) {
             printf("%d ", i);
-            total++;
+            abertos++;
         }
     }
-    printf("\nTotal abertos: %d\n", total);
+    printf("\nTotal de ficheiros abertos: %d\n", abertos);
 }
 
-typedef unsigned short tipo;
+// Verifica se um ficheiro é JPEG a partir dos primeiros 4 bytes
+int isjpg(int fd) {
+    unsigned char b[4];
+    int n = read(fd, b, 4);
 
-void printBits(tipo numero, tipo mascara) {
-    while (mascara) {
-        putchar((numero & mascara) ? '1' : '0');
-        mascara >>= 1;
+    if (n < 4) {
+        perror("Erro ao ler os bytes iniciais");
+        return 0;
     }
-}
 
-void displayBitOps(tipo a, tipo b) {
-    tipo mask = 0x8000;
-    printf("A: "); printBits(a, mask); printf(" (%u)\n", a);
-    printf("B: "); printBits(b, mask); printf(" (%u)\n", b);
-    printf("A&B: "); printBits(a & b, mask); printf(" (%u)\n", a & b);
-    printf("A|B: "); printBits(a | b, mask); printf(" (%u)\n", a | b);
-    printf("A^B: "); printBits(a ^ b, mask); printf(" (%u)\n", a ^ b);
-    printf("A&~B: "); printBits(a & ~b, mask); printf(" (%u)\n", a & ~b);
-}
+    lseek(fd, 0, SEEK_SET); // voltar ao início do ficheiro
 
+    if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF &&
+        (b[3] == 0xE0 || b[3] == 0xE1 || b[3] == 0xE2 || b[3] == 0xE8)) {
+        return 1;
+    }
+
+    return 0;
+}

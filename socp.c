@@ -1,22 +1,43 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "shell.h"
 
-void ioCopy(int IN, int OUT) {
-    char buf[4096];
-    ssize_t n;
-    while ((n = read(IN, buf, sizeof(buf))) > 0)
-        write(OUT, buf, n);
+// Função auxiliar para copiar dados entre dois descritores com bloco de tamanho definido
+void ioCopy(int IN, int OUT, int blksize) {
+    char buffer[blksize];
+    ssize_t bytes;
+
+    while ((bytes = read(IN, buffer, blksize)) > 0) {
+        if (write(OUT, buffer, bytes) < 0) {
+            perror("Erro ao escrever no destino");
+            break;
+        }
+    }
+
+    if (bytes < 0) {
+        perror("Erro ao ler do ficheiro fonte");
+    }
 }
 
-void socp(char *fonte, char *destino) {
-    int in = open(fonte, O_RDONLY);
-    if (in < 0) { perror("Erro ao abrir fonte"); return; }
+// Função principal do comando socp
+void socp(char *fonte, char *destino, int blksize) {
+    int fdin = open(fonte, O_RDONLY);
+    if (fdin < 0) {
+        perror("Erro ao abrir ficheiro fonte");
+        return;
+    }
 
-    int out = open(destino, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (out < 0) { perror("Erro ao abrir destino"); close(in); return; }
+    int fdout = open(destino, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fdout < 0) {
+        perror("Erro ao criar ficheiro destino");
+        close(fdin);
+        return;
+    }
 
-    ioCopy(in, out);
-    close(in);
-    close(out);
+    ioCopy(fdin, fdout, blksize);
+
+    close(fdin);
+    close(fdout);
 }

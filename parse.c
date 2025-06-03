@@ -1,25 +1,20 @@
 #include "shell.h"
 
-/*
-    parse . particiona o comando (armazenado em ptrLinha) em argumentos
-    exemplo ptrLinha -> "ls  -l /etc/passwd & "
-    O string contem caracteres e espaços e é terminado com um \0
-*/
-
-int parse (char *ptrLinha, char **args){
+int parse(char *buf, char **args)
+{
   int cnt = 0;
-  while ('\0' != *ptrLinha)
+  while (*buf != '\0')
+  {
+    while (*buf == ' ' || *buf == '\t')
+      *buf++ = '\0';
+    if (*buf != '\0')
     {
-      /* saltar whitespace. Substituimos whitespace por um \0 */
-      while (isspace ((unsigned char) *ptrLinha))
-        *ptrLinha++ = '\0';
-
-      *args++ = ptrLinha;/* salvaguarda argumento */
-      cnt++;/*novo: incremente do número de argumentos */
-      /* salta sobre os caracteres do argumento ou encontrar o fim da linha*/
-      while ((*ptrLinha != '\0') && (!isspace ((unsigned char) *ptrLinha)))
-        ptrLinha++;
+      *args++ = buf;
+      cnt++;
     }
-  *args = (char *) NULL;/* Inserir o ultimo argumento igual a NULL */
+    while (*buf != '\0' && *buf != ' ' && *buf != '\t')
+      buf++;
+  }
+  *args = NULL;
   return cnt;
 }
